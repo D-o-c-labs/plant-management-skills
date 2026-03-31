@@ -1,8 +1,9 @@
 import unittest
 
-from test_support import plant_test_env, read_json
+from skills.scripts.plant_mgmt import profiles
+from skills.scripts.tests.test_support import plant_test_env, read_json
 
-from plant_mgmt import profiles, registry
+from skills.scripts.plant_mgmt import registry
 
 
 class ProfilesTest(unittest.TestCase):

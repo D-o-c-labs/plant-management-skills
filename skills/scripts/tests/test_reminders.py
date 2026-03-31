@@ -1,8 +1,9 @@
 import unittest
 
-from test_support import plant_test_env
+from skills.scripts.plant_mgmt import registry
+from skills.scripts.tests.test_support import plant_test_env
 
-from plant_mgmt import registry, reminders
+from skills.scripts.plant_mgmt import reminders
 
 
 class RemindersTest(unittest.TestCase):

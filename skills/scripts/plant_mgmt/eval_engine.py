@@ -7,7 +7,9 @@ structured JSON for an AI agent to interpret and communicate.
 import json
 from datetime import datetime, timezone, timedelta
 
-from . import store, config, registry, profiles, events, reminders
+from . import config, events, profiles, registry, reminders
+
+from . import store
 
 
 # ---------------------------------------------------------------------------

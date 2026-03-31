@@ -1,8 +1,9 @@
 import unittest
 
-from test_support import plant_test_env
+from skills.scripts.plant_mgmt import eval_engine, events, profiles, registry
+from skills.scripts.tests.test_support import plant_test_env
 
-from plant_mgmt import eval_engine, events, profiles, registry, reminders
+from skills.scripts.plant_mgmt import reminders
 
 
 class EvalEngineTest(unittest.TestCase):
