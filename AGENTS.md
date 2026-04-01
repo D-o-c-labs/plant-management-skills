@@ -31,6 +31,9 @@ This file is a contributor contract for this repository. It is not a runtime gui
 
 - Default verification for substantive changes:
   - `python3 -m unittest discover -s skill/scripts/tests -v`
+- Contributor tooling:
+  - `npm run test` wraps the default unit-test command for the Husky pre-commit hook.
+  - `.husky/pre-commit` runs `npx lint-staged` before `npm run test`.
 - Add or update tests when behavior changes. Add regression coverage for bug fixes when practical.
 - Manual CLI smoke tests are additional, not default. Run them only when command parsing, env handling, or user-visible CLI behavior may have changed.
 - `PLANT_SKILL_DIR` and `PLANT_DATA_DIR` are verification-only env vars for manual CLI smoke tests. They are not ordinary contributor prerequisites and are not needed for the default unit-test workflow.
