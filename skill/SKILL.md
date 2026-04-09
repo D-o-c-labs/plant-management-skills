@@ -19,14 +19,20 @@ optional_env:
 
 # Plant Management Skill
 
-Use this skill to manage household plants through a validated Python CLI. The AI handles judgment and messaging. The Python code handles data integrity, schema validation, reminder state, and deterministic evaluation.
+Use this skill to manage household plants through the validated Python CLI. The AI handles judgment, clarification, and user messaging. The Python code handles data integrity, schema validation, reminder state, and deterministic care evaluation.
 
-## Rules
+## Operating Defaults
 
 - Never edit JSON files in `$PLANT_DATA_DIR` directly.
 - Always run commands from the skill root with `python3 scripts/plant_mgmt_cli.py ...`.
+- Prefer `--json` for reads, status checks, and anything you need to reason over programmatically.
+- If the user gives a clear, specific write request, run the matching CLI mutation directly. Ask only when the target or effect is genuinely ambiguous.
+- Treat `init --force`, `migrate`, broad inferred multi-plant writes, and unclear archive operations as higher-risk changes that may need confirmation.
+- For questions about due work, reminders, or current status, use evaluation output as the source of truth before improvising.
+- If the user is reporting completed care from a reminder-driven task, resolve the reminder when there is exactly one obvious open match. If there is no matching reminder, use `events log`.
+- Use external `lookup` commands only when the species or care details are unclear. If API keys are unavailable, continue with the best confirmed local information.
+- Routine CLI writes already validate before saving. Run `validate` or `check` explicitly only for setup, migration, repair, or diagnosis.
 - If the CLI reports missing dependencies, install `scripts/requirements.txt` into the host Python environment before continuing.
-- Prefer `--json` output when you need to reason over command results.
 
 ## First Run
 
@@ -52,69 +58,68 @@ Or:
 python3 scripts/plant_mgmt_cli.py init --from-existing /path/to/existing/data
 ```
 
-## Command Contract
+## Primary Workflows
 
-Always use this form:
+### 1. Status, due work, and reminders
 
-```bash
-python3 scripts/plant_mgmt_cli.py <command> [subcommand] [options]
-python3 scripts/plant_mgmt_cli.py --json <command> [subcommand] [options]
-```
-
-### Data directory
+Use these first when the user asks what needs attention, what is due, or whether something should be done now:
 
 ```bash
-python3 scripts/plant_mgmt_cli.py init [--force]
-python3 scripts/plant_mgmt_cli.py init --from-existing /path/to/source
-python3 scripts/plant_mgmt_cli.py validate
-python3 scripts/plant_mgmt_cli.py check
-python3 scripts/plant_mgmt_cli.py migrate /path/to/source
+python3 scripts/plant_mgmt_cli.py --json eval status
+python3 scripts/plant_mgmt_cli.py --json eval run [--weather '{"tempC":32,"humidity":35,"condition":"sunny"}'] [--dry-run]
+python3 scripts/plant_mgmt_cli.py --json eval run | python3 scripts/plant_mgmt_cli.py eval render
+python3 scripts/plant_mgmt_cli.py --json eval run | python3 scripts/plant_mgmt_cli.py --json eval render
 ```
 
-### Plants
+`eval run` returns:
+
+- `actions`: due items that should be pushed now
+- `suppressedActions`: due items blocked by push policy
+- `noAction`: evaluated plants that are not due
+- `stateChanges`: tasks opened, updated, or closed by this evaluation
+- `summary`: counts
+
+Interpretation:
+
+- `low`: mention casually
+- `medium`: worth checking now
+- `high`: action should happen soon
+- `critical`: urgent and should be phrased directly
+
+Messaging rules:
+
+- One message per evaluation run, not one message per plant
+- Group by location and action type
+- For 1-2 simple actions, one natural sentence is fine
+- For 3+ plants or mixed actions, use a grouped schematic format
+- If `actions` is empty, stay quiet unless the user explicitly asked for status
+
+Judgment rules:
+
+- Recovering plants: prefer “check first” over “water now”
+- Drought-tolerant plants: do not override conservative baselines with generic thirsty-plant advice
+- Heat stress and harsh placement can require shade or movement, not just water
+- If confidence is limited, ask for a manual check or photo instead of bluffing certainty
+
+### 2. Confirm completed care
+
+Use this decision tree:
+
+1. If the user is confirming an open reminder task, use `reminders confirm`.
+2. If the user does not provide a task ID, inspect open reminders and auto-confirm only when exactly one obvious task matches.
+3. If the care action did not come from a reminder, use `events log`.
+
+Common reminder commands:
 
 ```bash
-python3 scripts/plant_mgmt_cli.py plants list [--status active|recovering|archived|dead] [--location <locationId>]
-python3 scripts/plant_mgmt_cli.py plants get <plantId>
-python3 scripts/plant_mgmt_cli.py plants add --name "basilico" --location rear_balcony [--species "basil"] [--scientific-name "Ocimum basilicum"] [--sublocation rear_balcony_kitchen] [--irrigation-mode manual|automatic|mixed] [--irrigation-system rear_balcony_irrigation] [--indoor-outdoor indoor|outdoor] [--attached-to-irrigation] [--notes "..."]
-python3 scripts/plant_mgmt_cli.py plants update <plantId> --data '{"status":"recovering","notes":"Moved out of direct sun"}'
-python3 scripts/plant_mgmt_cli.py plants archive <plantId> [--reason "Died from frost"]
-python3 scripts/plant_mgmt_cli.py plants move <plantId> --location <locationId> [--sublocation <microzoneId>]
+python3 scripts/plant_mgmt_cli.py reminders list [--status open|done|expired|cancelled]
+python3 scripts/plant_mgmt_cli.py reminders get <taskId>
+python3 scripts/plant_mgmt_cli.py reminders confirm <taskId> [--details "Watered thoroughly"]
+python3 scripts/plant_mgmt_cli.py reminders confirm <taskId> --details "Neem applied this morning" --effective-date 2026-03-18 --effective-precision part_of_day --effective-part-of-day morning
+python3 scripts/plant_mgmt_cli.py reminders cancel <taskId> [--reason "Heavy rain made this irrelevant"]
 ```
 
-### Locations, microzones, irrigation
-
-```bash
-python3 scripts/plant_mgmt_cli.py locations list
-python3 scripts/plant_mgmt_cli.py locations get <locationId>
-python3 scripts/plant_mgmt_cli.py locations add --id rear_balcony --name "Rear balcony" --type balcony [--indoor-outdoor outdoor] [--exposure south]
-python3 scripts/plant_mgmt_cli.py locations update <locationId> --data '{"notes":"Hot after 14:00"}'
-
-python3 scripts/plant_mgmt_cli.py microzones list [--location <locationId>]
-python3 scripts/plant_mgmt_cli.py microzones add --id rear_balcony_wall --location rear_balcony --name "Against wall" [--data '{"lightClass":"high"}']
-python3 scripts/plant_mgmt_cli.py microzones update <microzoneId> --data '{"heatLoad":"high"}'
-
-python3 scripts/plant_mgmt_cli.py irrigation list
-python3 scripts/plant_mgmt_cli.py irrigation get <systemId>
-python3 scripts/plant_mgmt_cli.py irrigation update <systemId> --data '{"enabled":false}'
-```
-
-### Profiles
-
-Profile IDs are supported, but by default a profile’s `profileId` equals its `plantId`. The plant record stores the linked profile ID in fields like `wateringProfileId`.
-
-```bash
-python3 scripts/plant_mgmt_cli.py profiles list watering [--plant <plantId>]
-python3 scripts/plant_mgmt_cli.py profiles get watering <plantId-or-profileId>
-python3 scripts/plant_mgmt_cli.py profiles set watering <plantId> --data '{"baselineSource":"container citrus","seasonalBaseline":{"winter":{"level":"low","baseIntervalDays":[10,14]},"spring":{"level":"medium","baseIntervalDays":[5,8]},"summer":{"level":"high","baseIntervalDays":[2,4]},"autumn":{"level":"medium","baseIntervalDays":[6,9]}}}'
-python3 scripts/plant_mgmt_cli.py profiles remove watering <plantId-or-profileId>
-```
-
-Supported profile types: `watering`, `fertilization`, `repotting`, `pest`, `maintenance`, `healthcheck`.
-
-### Events
-
-Use `events log` when the user reports an action and there is no reminder task to confirm.
+Use `events log` when the user reports an action and there is no reminder task to confirm:
 
 ```bash
 python3 scripts/plant_mgmt_cli.py events log --type watering_confirmed --plant plant_001 --scope "manual watering" [--details '{"method":"watering_can"}']
@@ -134,77 +139,60 @@ Common event types:
 - `healthcheck_confirmed`
 - `photo_received`
 
-### Reminders
+Typical free-text mappings:
 
-Use `reminders confirm` when the user is confirming an existing reminder task. This command automatically logs the canonical care event stored on the task, so custom recurring programs do not need Python changes.
+- “I watered it” / “innaffiato” / “dato acqua” -> `watering_confirmed`
+- “It rained” / “ha piovuto” -> `rain_confirmed`
+- “Neem done” / “neem fatto” -> `neem_confirmed`
+- “Fertilized” / “concimato” -> `fertilization_confirmed`
+- “Repotted” / “rinvasato” -> `repotting_confirmed`
 
-```bash
-python3 scripts/plant_mgmt_cli.py reminders list [--status open|done|expired|cancelled]
-python3 scripts/plant_mgmt_cli.py reminders get <taskId>
-python3 scripts/plant_mgmt_cli.py reminders confirm <taskId> [--details "Watered thoroughly"]
-python3 scripts/plant_mgmt_cli.py reminders confirm <taskId> --details "Neem applied this morning" --effective-date 2026-03-18 --effective-precision part_of_day --effective-part-of-day morning
-python3 scripts/plant_mgmt_cli.py reminders cancel <taskId> [--reason "Heavy rain made this irrelevant"]
-python3 scripts/plant_mgmt_cli.py reminders reset
-python3 scripts/plant_mgmt_cli.py reminders repair
-```
+If the user says “I watered the balcony”, apply it to the active plants in that location if the target set is obvious. Ask only when the target plants are genuinely ambiguous.
 
-Reminder task IDs are rule-scoped and may also include a program ID:
+### 3. Quick registry and profile changes
 
-- `watering_check:watering_profiles:plant_001`
-- `neem_treatment:pest_recurring_programs:plant_001:neem_cycle`
-
-### Evaluation
+Use these for common CRUD work:
 
 ```bash
-python3 scripts/plant_mgmt_cli.py --json eval run [--weather '{"tempC":32,"humidity":35,"condition":"sunny"}'] [--dry-run]
-python3 scripts/plant_mgmt_cli.py --json eval status
+python3 scripts/plant_mgmt_cli.py plants list [--status active|recovering|archived|dead] [--location <locationId>]
+python3 scripts/plant_mgmt_cli.py plants get <plantId>
+python3 scripts/plant_mgmt_cli.py plants add --name "basilico" --location rear_balcony [--species "basil"] [--scientific-name "Ocimum basilicum"] [--sublocation rear_balcony_kitchen] [--irrigation-mode manual|automatic|mixed] [--irrigation-system rear_balcony_irrigation] [--indoor-outdoor indoor|outdoor] [--attached-to-irrigation] [--notes "..."]
+python3 scripts/plant_mgmt_cli.py plants update <plantId> --data '{"status":"recovering","notes":"Moved out of direct sun"}'
+python3 scripts/plant_mgmt_cli.py plants move <plantId> --location <locationId> [--sublocation <microzoneId>]
+python3 scripts/plant_mgmt_cli.py plants archive <plantId> [--reason "Died from frost"]
 ```
-
-`eval run` returns:
-
-- `actions`: due items that should be pushed now
-- `suppressedActions`: due items blocked by push policy
-- `noAction`: evaluated plants that are not due
-- `stateChanges`: tasks opened, updated, or closed by this evaluation
-- `summary`: counts
-
-Interpretation:
-
-- `low`: mention casually
-- `medium`: worth checking now
-- `high`: action should happen soon
-- `critical`: urgent and should be phrased directly
-
-Judgment rules:
-
-- Recovering plants: prefer “check first” over “water now”
-- Drought-tolerant plants: do not override conservative baselines with generic thirsty-plant advice
-- Heat stress and harsh placement can require shade or movement, not just water
-- If confidence is limited, ask for a manual check or photo instead of bluffing certainty
-
-Messaging rules:
-
-- One message per evaluation run, not one message per plant
-- Group by location and action type
-- For 1-2 simple actions, one natural sentence is fine
-- For 3+ plants or mixed actions, use a schematic grouped format
-- If `actions` is empty, stay quiet unless the user explicitly asked for status
-
-### Rendering
 
 ```bash
-python3 scripts/plant_mgmt_cli.py --json eval run | python3 scripts/plant_mgmt_cli.py eval render
-python3 scripts/plant_mgmt_cli.py --json eval run | python3 scripts/plant_mgmt_cli.py --json eval render
+python3 scripts/plant_mgmt_cli.py locations list
+python3 scripts/plant_mgmt_cli.py locations get <locationId>
+python3 scripts/plant_mgmt_cli.py locations add --id rear_balcony --name "Rear balcony" --type balcony [--indoor-outdoor outdoor] [--exposure south]
+python3 scripts/plant_mgmt_cli.py locations update <locationId> --data '{"notes":"Hot after 14:00"}'
 ```
 
-The `eval render` command reads the full `eval run` result from stdin and produces a human-readable reminder message from the `actions` array.
+```bash
+python3 scripts/plant_mgmt_cli.py profiles list watering [--plant <plantId>]
+python3 scripts/plant_mgmt_cli.py profiles get watering <plantId-or-profileId>
+python3 scripts/plant_mgmt_cli.py profiles set watering <plantId> --data '{"baselineSource":"container citrus","seasonalBaseline":{"winter":{"level":"low","baseIntervalDays":[10,14]},"spring":{"level":"medium","baseIntervalDays":[5,8]},"summer":{"level":"high","baseIntervalDays":[2,4]},"autumn":{"level":"medium","baseIntervalDays":[6,9]}}}'
+python3 scripts/plant_mgmt_cli.py profiles remove watering <plantId-or-profileId>
+```
 
-- Locale is resolved from `PLANT_LOCALE` / `config.locale` (default: `en`, supported: `en`, `it`)
-- `--json` wraps the result as `{"message": "..."}` or `{"message": null}`
-- Without `--json`, it prints raw text or nothing if there are no actions
-- The renderer only uses `actions`; `suppressedActions` and `noAction` are not rendered
+Supported profile types: `watering`, `fertilization`, `repotting`, `pest`, `maintenance`, `healthcheck`.
 
-### Lookup
+Profile IDs are supported, but by default a profile’s `profileId` equals its `plantId`. The plant record stores the linked profile ID in fields like `wateringProfileId`.
+
+### 4. Onboard a new plant
+
+When adding new plants:
+
+1. Identify the plant from a photo or text description.
+2. Use `lookup` only if species or care info is unclear.
+3. Create the plant record with `plants add`.
+4. Create at least a watering profile. Add fertilization or other profiles if you know them.
+5. Re-run `eval run --dry-run` to verify the plant is now part of evaluation.
+
+Prefer onboarding one location at a time.
+
+Lookup commands:
 
 ```bash
 python3 scripts/plant_mgmt_cli.py lookup search "monstera deliciosa"
@@ -221,35 +209,43 @@ Lookup cascade:
 
 Lookup results are cached in `$PLANT_DATA_DIR/lookup_cache.json`.
 
-## Confirmation Workflow
+### 5. Setup, validation, and recovery
 
-Use this decision tree:
+Use these for initialization, migration, or diagnosis:
 
-1. If the user is confirming an open reminder task, run `reminders confirm <taskId>`.
-2. If the user is reporting care that did not come from a reminder, run `events log`.
-3. If the user’s wording is broad but still actionable, map it deterministically.
+```bash
+python3 scripts/plant_mgmt_cli.py init [--force]
+python3 scripts/plant_mgmt_cli.py init --from-existing /path/to/source
+python3 scripts/plant_mgmt_cli.py migrate /path/to/source
+python3 scripts/plant_mgmt_cli.py validate
+python3 scripts/plant_mgmt_cli.py check
+python3 scripts/plant_mgmt_cli.py reminders reset
+python3 scripts/plant_mgmt_cli.py reminders repair
+```
 
-Typical free-text mappings:
+Validated reads of `reminder_state.json` are self-healing. If the file is still in a recoverable legacy shape, normal runtime reads plus `validate` and `check` rewrite it to the current v2 schema and keep a `.bak` copy of the pre-repair file. Use `reminders repair` when you want to run that normalization explicitly.
 
-- “I watered it” / “innaffiato” / “dato acqua” -> `watering_confirmed`
-- “It rained” / “ha piovuto” -> `rain_confirmed`
-- “Neem done” / “neem fatto” -> `neem_confirmed`
-- “Fertilized” / “concimato” -> `fertilization_confirmed`
-- “Repotted” / “rinvasato” -> `repotting_confirmed`
+Reminder task IDs are rule-scoped and may also include a program ID:
 
-If the user says “I watered the balcony”, apply it to the active plants in that location if the target set is obvious. Ask only when the target plants are genuinely ambiguous.
+- `watering_check:watering_profiles:plant_001`
+- `neem_treatment:pest_recurring_programs:plant_001:neem_cycle`
 
-## Onboarding Workflow
+## Command Contract
 
-When adding new plants:
+Use this form for all commands:
 
-1. Identify the plant from a photo or text description.
-2. Use `lookup search` and `lookup care` if species/care info is unclear.
-3. Create the plant record with `plants add`.
-4. Create at least a watering profile. Add fertilization or other profiles if you know them.
-5. Re-run `eval run --dry-run` to verify the plant is now part of evaluation.
+```bash
+python3 scripts/plant_mgmt_cli.py <command> [subcommand] [options]
+python3 scripts/plant_mgmt_cli.py --json <command> [subcommand] [options]
+```
 
-Prefer onboarding one location at a time.
+For rarer commands or uncommon option combinations, use the built-in CLI help:
+
+```bash
+python3 scripts/plant_mgmt_cli.py --help
+python3 scripts/plant_mgmt_cli.py <command> --help
+python3 scripts/plant_mgmt_cli.py <command> <subcommand> --help
+```
 
 ## Data Model Notes
 
@@ -265,5 +261,6 @@ Prefer onboarding one location at a time.
 
 - Missing dependency error: install `scripts/requirements.txt` in the host Python environment.
 - Validation error on write: inspect the JSON schema named in the error and correct the command payload.
+- Legacy reminder-state validation failure: rerun `validate` or `check`; recoverable `reminder_state.json` payloads now self-heal automatically and leave a `.bak` snapshot.
 - Empty eval result: check that plants are active, profiles exist, and the relevant care rules are enabled.
 - Unexpected reminder still open: run `eval run` again; the evaluator now closes tasks that are no longer due.

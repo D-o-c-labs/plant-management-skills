@@ -10,6 +10,7 @@
     "bins": ["python3"]
   },
   "optional_env": [
+    "PLANT_SKILL_DIR",
     "PLANT_TIMEZONE",
     "PLANT_LOCALE",
     "TREFLE_API_KEY",
